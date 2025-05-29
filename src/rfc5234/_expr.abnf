@@ -1,0 +1,76 @@
+;; @emit
+bool-expr = bool-arg [ws] bool-op [ws] bool-arg
+          / int-arg [ws] comparison-op [ws] int-arg
+          / bool-arg
+
+bool-arg = "(" [ws] bool-expr [ws] ")" / bool-fn
+
+;; @emit
+bool-fn = fn-not "(" [ws] bool-arg [ws] ")"
+        / fn-empty "(" [ws] stack-ref [ws] ")"
+
+;; @emit
+fn-not = %s"not"
+
+;; @emit
+fn-empty = %s"empty"
+
+;; @emit
+bool-op = "and" / "or"
+
+;; @emit
+comparison-op = "=" / "!=" / "<=" / "<" / ">=" / ">"
+
+;; @emit
+int-expr = int-arg [ws] int-op [ws] int-arg / int-simple
+
+int-arg = "(" [ws] int-expr [ws] ")" / int-simple
+
+int-simple = int-fn / counter-ref / "$" special-ref / int-lit
+
+;; @emit
+int-lit = 1*digit
+
+;; @emit
+int-op = "+" / "-" / "*"
+
+;; @emit
+int-fn = fn-top "(" [ws] stack-ref [ws] ")"
+       / fn-arg1 "(" [ws] int-arg [ws] ")"
+       / fn-arg2 "(" [ws] int-arg [ws] "," [ws] int-arg [ws] ")"
+
+;; @emit
+fn-top = %s"top"
+
+;; @emit
+fn-arg1 = %s"abs"
+
+;; @emit
+fn-arg2 = %s"min" / %s"max"
+
+;; @emit
+stack-ref = ref
+
+;; @emit
+counter-ref = ref
+
+;; @emit
+special-ref = ref
+
+;; @inline
+ref = alpha *(alnum / "-")
+
+;; @inline
+alpha = %x41-5A / %x61-7A
+
+;; @inline
+digit = %x30-39
+
+;; @inline
+alnum = alpha / digit
+
+;; @inline
+space = %x20
+
+;; @inline
+ws = 1*space
