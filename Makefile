@@ -8,7 +8,7 @@ fmt:
 build:
 	uv run python -m build
 
-twine-check:
+twine-check: build
 	uv run twine check dist/*
 
 publish: build twine-check

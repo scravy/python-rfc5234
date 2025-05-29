@@ -10,7 +10,6 @@ from colorama import Back, Fore, Style
 from .exc import UnexpectedCharacter
 
 
-
 @final
 class TokenDef(NamedTuple):
     pattern: re.Pattern[str]
@@ -36,7 +35,9 @@ class TokenKind(Enum):
         style=(Back.BLACK, Style.BRIGHT, Fore.LIGHTWHITE_EX),
     )
     STACK_PRAGMA = TokenDef(
-        pattern=re.compile(rf"(?m:^(;; )?@@stack (?P<stack_name>{_RULENAME.pattern}))\n"),
+        pattern=re.compile(
+            rf"(?m:^(;; )?@@stack (?P<stack_name>{_RULENAME.pattern}))\n"
+        ),
         style=Fore.LIGHTRED_EX,
     )
     COUNTER_PRAGMA = TokenDef(
