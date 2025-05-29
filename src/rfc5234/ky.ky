@@ -1,0 +1,29 @@
+'kaylee-lang.org/2025
+
+use: 'kaylee-lang.org/2025/std
+
+a + b
+a+b
+a + b + f x
+f x + f y
+
+f( a , b )
+g(a=b, c=d)
+
+a:foo::b:one
+
+a[1][a .. b]
+
+a . b
+
+a .. b
+a..b
+a ::: b
+
+a ! b
+a!!b
+a*b
+a < b
+a<b > b + 3 >
+a # b
+a(a)

@@ -1,0 +1,42 @@
+[project]
+name = "rfc5234"
+version = "0.1.0"
+description = "A python implementation of RFC 5234: Augmented BNF for Syntax Specifications: ABNF"
+readme = "README.md"
+authors = [
+    { name = "Julian Bertram", email = "tirednesscankill@warhog.net" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "colorama>=0.4.6",
+    "frozenintset>=0.1.2",
+    "strongly-connected-components>=0.1.1",
+]
+license = { text = "MIT" }
+keywords = ["rfc5234", "rfc7405", "parser", "abnf"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+    "Intended Audience :: Developers",
+]
+
+[project.urls]
+Source = "https://github.com/scravy/python-rfc5234"
+Tracker = "https://github.com/scravy/python-rfc5234/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "mypy>=1.16.0",
+    "ruff>=0.11.12",
+    "twine>=6.1.0",
+    "types-colorama>=0.4.15.20240311",
+]
