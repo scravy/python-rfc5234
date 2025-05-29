@@ -1,6 +1,6 @@
 [project]
 name = "rfc5234"
-version = "0.1.1"
+version = "0.1.2"
 description = "A python implementation of RFC 5234: Augmented BNF for Syntax Specifications: ABNF"
 readme = "README.md"
 authors = [
@@ -42,8 +42,6 @@ dev = [
 ]
 
 [tool.hatch.build]
-sources = ["src"]
-
 include = [
   "src/rfc5234/_abnf.abnf",
   "src/rfc5234/_abnf_original.abnf",
