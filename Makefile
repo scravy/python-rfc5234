@@ -2,13 +2,16 @@ lint:
 	uv run ruff check
 	uv run mypy .
 
+test:
+	uv run pytest
+
 fmt:
 	uv run ruff format
 
 build:
 	uv run python -m build
 
-twine-check: build
+check: lint test build
 	uv run twine check dist/*
 
 publish: build twine-check
@@ -16,3 +19,5 @@ publish: build twine-check
 
 clean:
 	rm -rf dist/
+
+.PHONY: lint test fmt build check publish clean

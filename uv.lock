@@ -114,11 +114,11 @@ wheels = [
 
 [[package]]
 name = "frozenintset"
-version = "0.1.2"
+version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/93/36/528c0c002b2b016ff1bf478bddeee68c45f0f4719e0488824a9dfd841fe0/frozenintset-0.1.2.tar.gz", hash = "sha256:3d2a2042fcc99a6b85e832cc850f0b7ae82e76cb942753d2b43a9d8ae0cfab98", size = 26481 }
+sdist = { url = "https://files.pythonhosted.org/packages/90/a9/df9498b613bda7990c674ee51d819b94d9d369f128bab7dfc233fc57150d/frozenintset-0.1.3.tar.gz", hash = "sha256:6a73870e0187b6ad5dc00aec35312893a60389f36964a850caffc5e83dfb7f27", size = 31032 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/a2/43dc823a4c770a487c0f45b3ddc18539be4ec32863b4b01ed567469cfad6/frozenintset-0.1.2-py3-none-any.whl", hash = "sha256:6ede363abd7c9798bc2dd739b87fcc5ae9910c5d3cf285d52e6d98454e4e896a", size = 5240 },
+    { url = "https://files.pythonhosted.org/packages/51/ce/80a8f64c2f1593475e30de06b550b087339c1936a8cdd4dc0d4d837b95e7/frozenintset-0.1.3-py3-none-any.whl", hash = "sha256:f6e4015d7e600ce7ece8492383d07d0c6ee134eae0960f0019df786d9085d14e", size = 6103 },
 ]
 
 [[package]]
@@ -451,7 +451,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "colorama", specifier = ">=0.4.6" },
-    { name = "frozenintset", specifier = ">=0.1.2" },
+    { name = "frozenintset", specifier = ">=0.1.3" },
     { name = "strongly-connected-components", specifier = ">=0.1.1" },
 ]
 
