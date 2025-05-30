@@ -1,7 +1,6 @@
 import dataclasses
 import itertools
 import re
-import sys
 from collections import deque, ChainMap
 from collections.abc import (
     Callable,
@@ -9,13 +8,23 @@ from collections.abc import (
     Iterator,
     Set,
 )
-from enum import auto, IntFlag, IntEnum
 from pathlib import Path
-from typing import NamedTuple, final, Final, Self, TextIO
+from typing import NamedTuple, final, Final, Self
 
+from frozenintset import FrozenIntSet
+from strongly_connected_components import strongly_connected_components
+
+from .abnf import read_abnf
+from .ast import AST, ASTBuilder, ASTLeaf, ASTNode
 from .context import Context
+from .defs import (
+    ParseEventKind,
+    ParseEvent,
+    ParsingStrategy,
+    InlineStrategy,
+    Opts,
+)
 from .exc import (
-    EmptyStack,
     EndOfFile,
     Expected,
     NoAlternativeMatched,
@@ -32,8 +41,6 @@ from .expr import (
     Regex,
     Seq,
 )
-from strongly_connected_components import strongly_connected_components
-from frozenintset import FrozenIntSet
 from .simple_expr import (
     And,
     BoolExpr,
@@ -51,106 +58,11 @@ from .simple_expr import (
     Or,
     SpecialRef,
     TopFn,
+    eval_bool_expr,
+    eval_int_expr,
 )
 from .tokenize import clean, tokenize, TokenKind, Token
-
-
-def _consume[E, R](gen: Generator[E, None, R]) -> tuple[R, list[E]]:
-    rs: list[E] = list()
-    try:
-        while True:
-            value = next(gen)
-            rs.append(value)
-    except StopIteration as e:
-        return e.value, rs
-
-
-@final
-class ParseEventKind(IntFlag):
-    START = auto()
-    VALUE = auto()
-    END = auto()
-
-
-@final
-class ParseEvent(NamedTuple):
-    kind: ParseEventKind
-    rule: str
-    pos: int
-    value: str = ""
-
-
-type AST = ASTNode | ASTLeaf
-
-
-@final
-class ASTNode(NamedTuple):
-    kind: str
-    children: tuple["AST", ...]
-
-    def to_json(self):
-        return {self.kind: [child.to_json() for child in self.children]}
-
-    def __contains__(self, item: object) -> bool:
-        if isinstance(item, str):
-            for child in self.children:
-                if child.kind == item:
-                    return True
-        return False
-
-    def render(self, fp: TextIO = sys.stdout, indent: int = 0) -> None:
-        # noinspection PyTypeChecker
-        print(indent * "  ", f"{self.kind}:", sep="", file=fp)
-        for child in self.children:
-            child.render(fp, indent + 1)
-
-
-@final
-class ASTLeaf(NamedTuple):
-    kind: str
-    value: str
-
-    def to_json(self):
-        return {self.kind: self.value}
-
-    def render(self, fp: TextIO = sys.stdout, indent: int = 0) -> None:
-        # noinspection PyTypeChecker
-        print(indent * "  ", f"{self.kind}: {self.value}", sep="", file=fp)
-
-
-@final
-class _AST(NamedTuple):
-    kind: str
-    start: int
-    children: list[AST]
-
-    def build(self, source: str, pos: int) -> AST:
-        if self.children:
-            return ASTNode(self.kind, tuple(self.children))
-        return ASTLeaf(self.kind, source[self.start : pos])
-
-
-@final
-class ParsingStrategy(IntEnum):
-    FIRST_MATCH = auto()
-    LONGEST_MATCH = auto()
-
-
-@final
-class InlineStrategy(IntEnum):
-    NO_INLINE = auto()
-    EXPLICIT = auto()
-    AGGRESSIVE = auto()
-
-
-@final
-class Opts(NamedTuple):
-    events: None | ParseEventKind = None
-    events_filter: None | re.Pattern[str] = None
-    strategy: None | ParsingStrategy = None
-    use_regex: bool | None = None
-    use_cache: bool | None = None
-    inline_strategy: InlineStrategy | None = None
+from .util import consume
 
 
 @final
@@ -199,74 +111,6 @@ class _Options:
 type Action = _PushPragma | _PopPragma | _SetPragma | _RequirePragma
 
 
-def _eval_bool_expr(ctx: Context, pos: int, expr: BoolExpr) -> bool:
-    match expr:
-        case And(left, right):
-            return _eval_bool_expr(ctx, pos, left) and _eval_bool_expr(ctx, pos, right)
-        case Or(left, right):
-            return _eval_bool_expr(ctx, pos, left) or _eval_bool_expr(ctx, pos, right)
-        case Not(expr):
-            return not _eval_bool_expr(ctx, pos, expr)
-        case Comparison(op, left, right):
-            left_result = _eval_int_expr(ctx, pos, left)
-            right_result = _eval_int_expr(ctx, pos, right)
-            match op:
-                case ComparisonOp.EQ:
-                    return left_result == right_result
-                case ComparisonOp.NEQ:
-                    return left_result != right_result
-                case ComparisonOp.LT:
-                    return left_result < right_result
-                case ComparisonOp.LTE:
-                    return left_result <= right_result
-                case ComparisonOp.GT:
-                    return left_result > right_result
-                case ComparisonOp.GTE:
-                    return left_result >= right_result
-        case EmptyFn(stack_name):
-            return ctx.top(stack_name) is None
-    raise RuntimeError("unreachable code")
-
-
-def _eval_int_expr(ctx: Context, pos: int, expr: IntExpr) -> int:
-    match expr:
-        case IntApp1(fn, arg):
-            val = _eval_int_expr(ctx, pos, arg)
-            match fn:
-                case IntFn1.ABS:
-                    return abs(val)
-            raise RuntimeError(f"unknown unary function {fn}")
-        case IntApp2(fn, arg1, arg2):
-            arg1_value = _eval_int_expr(ctx, pos, arg1)
-            arg2_value = _eval_int_expr(ctx, pos, arg2)
-            match fn:
-                case IntFn2.MIN:
-                    return min(arg1_value, arg2_value)
-                case IntFn2.MAX:
-                    return max(arg1_value, arg2_value)
-                case IntFn2.ADD:
-                    return arg1_value + arg2_value
-                case IntFn2.SUB:
-                    return arg1_value - arg2_value
-                case IntFn2.MUL:
-                    return arg1_value * arg2_value
-            raise RuntimeError(f"unknown binary function {fn}")
-        case TopFn(stack_name):
-            top = ctx.top(stack_name)
-            if top is not None:
-                return top
-            raise EmptyStack(stack_name)
-        case CounterRef(counter_name):
-            return ctx.get(counter_name)
-        case SpecialRef("pos"):
-            return pos
-        case SpecialRef():
-            raise RuntimeError("unknown special reference")
-        case IntLit(value):
-            return value
-    raise RuntimeError("unreachable code")
-
-
 @final
 class Rule(NamedTuple):
     expr: Expr
@@ -278,13 +122,13 @@ class Rule(NamedTuple):
         for action in self.actions:
             match action:
                 case _PushPragma(stack_name, expr):
-                    local_ctx.push(stack_name, _eval_int_expr(ctx, pos, expr))
+                    local_ctx.push(stack_name, eval_int_expr(ctx, pos, expr))
                 case _PopPragma(stack_name):
                     local_ctx.pop(stack_name)
                 case _SetPragma(counter_name, expr):
-                    local_ctx.set(counter_name, _eval_int_expr(ctx, pos, expr))
+                    local_ctx.set(counter_name, eval_int_expr(ctx, pos, expr))
                 case _RequirePragma(expr):
-                    if not _eval_bool_expr(ctx, pos, expr):
+                    if not eval_bool_expr(ctx, pos, expr):
                         raise RequireFailed
         ctx.join(local_ctx)
 
@@ -581,25 +425,17 @@ class Grammar:
                 match e:
                     case Ref(ruleref):
                         out.update(check_leftmost(ruleref, stack))
-                        return False
+                        return ruleref in nullable
                     case Alt(branches):
-                        for b in branches:
-                            recurse(b)
-                        return False
+                        return any(recurse(b) for b in branches)
                     case Seq(steps):
                         for s in steps:
-                            if recurse(s):
-                                continue
-                            match s:
-                                case Ref(name):
-                                    if name not in nullable:
-                                        break
-                                case _:
-                                    break
-                        return False
+                            if not recurse(s):
+                                return False
+                        return True  # all steps nullable
                     case Many(expr=subexpr):
                         recurse(subexpr)
-                        return False
+                        return True
                     case Char():
                         return False
                 raise RuntimeError("unreachable code")
@@ -676,12 +512,12 @@ class Grammar:
                 },
             }
         )
-        stack: deque[_AST] = deque()
-        stack.append(_AST(self.entrypoint, 0, []))
+        stack: deque[ASTBuilder] = deque()
+        stack.append(ASTBuilder(self.entrypoint, 0, []))
         for evk, name, pos, _ in self.parse(s, opts=opts):
             match evk:
                 case ParseEventKind.START:
-                    stack.append(_AST(name, pos, []))
+                    stack.append(ASTBuilder(name, pos, []))
                 case ParseEventKind.END:
                     ast = stack.pop()
                     stack[-1].children.append(ast.build(s, pos))
@@ -698,7 +534,7 @@ class Grammar:
     def _parse_uncached(
         self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
     ) -> tuple[int, list[ParseEvent]]:
-        return _consume(self._parse(expr, s, ix, opts, ctx))
+        return consume(self._parse(expr, s, ix, opts, ctx))
 
     def _parse_buffered(
         self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
@@ -788,21 +624,21 @@ class Grammar:
                 try:
                     local_ctx = ctx.fork()
                     parser = self._parse(r.expr, s, ix, opts, local_ctx)
-                    ix, rs = _consume(parser)
+                    ix, rs = consume(parser)
                     ctx.join(local_ctx)
                     yield from rs
                 except NoParse:
-                    return ix
+                    break
         else:
             while True:
                 try:
                     local_ctx = ctx.fork()
                     parser = self._parse(r.expr, s, ix, opts, local_ctx)
-                    ix, rs = _consume(parser)
+                    ix, rs = consume(parser)
                     ctx.join(local_ctx)
                     yield from rs
                 except NoParse:
-                    return ix
+                    break
         return ix
 
     def _parse_char(self, expr: Char, s: str, ix: int) -> int:
@@ -900,9 +736,9 @@ class _RequirePragma(NamedTuple):
 @final
 class SimpleExpressionParser:
     def __init__(self):
-        fp = Path(__file__).parent / "_expr.abnf"
+        g = read_abnf("simple_expr")
         p = Parser()
-        p.load_file(fp)
+        p.load(g)
         self._bool_expr_grammar = p.compile("bool-expr")
         self._int_expr_grammar = p.compile("int-expr")
 
