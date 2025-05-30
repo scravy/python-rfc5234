@@ -1,6 +1,6 @@
 [project]
 name = "rfc5234"
-version = "0.1.5"
+version = "0.1.6"
 description = "A python implementation of RFC 5234: Augmented BNF for Syntax Specifications: ABNF"
 readme = "README.md"
 authors = [
