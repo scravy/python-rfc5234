@@ -5,13 +5,16 @@ lint:
 test:
 	uv run pytest
 
+nox:
+	uv run nox
+
 fmt:
 	uv run ruff format
 
 build:
 	uv run python -m build
 
-check: lint test build
+check: lint test nox build
 	uv run twine check dist/*
 
 publish: build twine-check
