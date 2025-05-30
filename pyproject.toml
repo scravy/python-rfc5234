@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Julian Bertram", email = "tirednesscankill@warhog.net" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "colorama>=0.4.6",
     "frozenintset>=0.1.3",
@@ -36,6 +36,7 @@ build-backend = "hatchling.build"
 dev = [
     "build>=1.2.2.post1",
     "mypy>=1.16.0",
+    "nox>=2025.5.1",
     "pytest>=8.3.5",
     "ruff>=0.11.12",
     "twine>=6.1.0",
