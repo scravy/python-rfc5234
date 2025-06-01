@@ -175,6 +175,7 @@ def tokenize(s: str, /) -> Iterator[Token]:
 
 def clean(tokens: Iterator[Token]):
     for token in tokens:
+        # noinspection PyUnreachableCode
         match token.kind:
             case TokenKind.SKIP:
                 pass

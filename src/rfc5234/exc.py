@@ -1,19 +1,44 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Iterable
 from typing import final
 
-from .expr import Expr
 from frozenintset import FrozenIntSet
+
+from .expr import Expr
 
 
 class ParseError(Exception):
     pass
 
 
-class UnexpectedCharacter(ParseError):
+class LeftRecursionDetected(ParseError, ValueError):
+    def __init__(self, cycle: list[str]):
+        super().__init__(f"Left recursion detected: {' → '.join(cycle)}")
+
+
+class MultipleEntrypointsDefined(ParseError, ValueError):
+    def __init__(self, entrypoints: Iterable[str]):
+        super().__init__(f"multiple entrypoints defined via @entrypoint: {', '.join(entrypoints)}")
+
+
+class EntrypointInferrenceFailed(ParseError):
+    def __init__(self):
+        super().__init__("can not infer entrypoint from grammar, must be specified")
+
+
+class MissingReference(ParseError):
+    def __init__(self, name: str, ref: str):
+        super().__init__(f"rule {name} references missing rule {ref}")
+
+
+class UnexpectedCharacter(ParseError, ValueError):
     pass
 
 
 class NoParse(ParseError):
+    pass
+
+
+class InexhaustiveParse(NoParse):
     pass
 
 

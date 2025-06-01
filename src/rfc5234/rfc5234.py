@@ -30,7 +30,8 @@ from .exc import (
     NoAlternativeMatched,
     NoParse,
     ParseError,
-    RequireFailed,
+    RequireFailed, InexhaustiveParse, LeftRecursionDetected, MultipleEntrypointsDefined, EntrypointInferrenceFailed,
+    MissingReference,
 )
 from .expr import (
     Alt,
@@ -69,7 +70,7 @@ from .util import consume
 @dataclasses.dataclass(frozen=True)
 class _Options:
     events: ParseEventKind = (
-        ParseEventKind.START | ParseEventKind.VALUE | ParseEventKind.END
+              ParseEventKind.START | ParseEventKind.VALUE | ParseEventKind.END
     )
     events_filter: re.Pattern[str] | None = None
     strategy: ParsingStrategy = ParsingStrategy.LONGEST_MATCH
@@ -169,12 +170,12 @@ class Grammar:
     __slots__ = ("_rules", "_context", "_entrypoint", "_opts", "_hash", "_cache")
 
     def __init__(
-        self,
-        rules: dict[str, Rule],
-        entrypoint: str | None,
-        opts: Opts | None,
-        stacks: set[str],
-        counters: dict[str, int],
+              self,
+              rules: dict[str, Rule],
+              entrypoint: str | None,
+              opts: Opts | None,
+              stacks: set[str],
+              counters: dict[str, int],
     ):
         self._opts: Final[_Options] = _Options().override(opts)
         entrypoint, rules = self._check_rules(self._opts, rules, entrypoint)
@@ -208,7 +209,7 @@ class Grammar:
 
     @classmethod
     def _check_rules(
-        cls, opts: _Options, rules: dict[str, Rule], entrypoint: str | None
+              cls, opts: _Options, rules: dict[str, Rule], entrypoint: str | None
     ) -> tuple[str, dict[str, Rule]]:
         g = dict()
         to_be_inlined: set[str] = set()
@@ -216,29 +217,27 @@ class Grammar:
         entrypoints: set[str] = set()
         for name, rule in rules.items():
             if (
-                opts.inline_strategy == InlineStrategy.AGGRESSIVE
-                and "emit" not in rule.flags
-                and not rule.actions
+                      opts.inline_strategy == InlineStrategy.AGGRESSIVE
+                      and "emit" not in rule.flags
+                      and not rule.actions
             ):
                 to_be_inlined.add(name)
             if (
-                opts.inline_strategy != InlineStrategy.NO_INLINE
-                and "inline" in rule.flags
+                      opts.inline_strategy != InlineStrategy.NO_INLINE
+                      and "inline" in rule.flags
             ):
                 force_inlined.add(name)
             if "entrypoint" in rule.flags:
                 entrypoints.add(name)
         if len(entrypoints) > 1:
-            raise ValueError(
-                f"multiple entrypoints defined via @entrypoint: {', '.join(entrypoints)}"
-            )
+            raise MultipleEntrypointsDefined(entrypoints)
         if entrypoint is None and len(entrypoints) == 1:
             entrypoint = next(iter(entrypoints))
         for name, rule in rules.items():
             refs = frozenset(cls._refs(rule.expr))
             for ref in refs:
                 if ref not in rules:
-                    raise ValueError(f"rule {name} references missing rule {ref}")
+                    raise MissingReference(name, ref)
             g[name] = refs
         sccs: tuple[frozenset[str], ...] = tuple(strongly_connected_components(g))
         for scc in sccs:
@@ -251,7 +250,7 @@ class Grammar:
         if entrypoint is None and len(rules) == 1:
             entrypoint = next(iter(rules))
         if entrypoint is None:
-            raise ValueError("can not infer entrypoint from grammar, must be specified")
+            raise EntrypointInferrenceFailed
         to_be_inlined -= {entrypoint}
         cls._check_left_recursion(rules, sccs)
         for ix, scc in enumerate(sccs):
@@ -273,7 +272,7 @@ class Grammar:
 
     @classmethod
     def __all_refs(
-        cls, rules: dict[str, Rule], name: str, visited: set[str]
+              cls, rules: dict[str, Rule], name: str, visited: set[str]
     ) -> Iterator[str]:
         visited.add(name)
         rule = rules[name]
@@ -294,11 +293,11 @@ class Grammar:
 
     @classmethod
     def _flatten(
-        cls,
-        extract: Callable[[Expr], tuple[Expr, ...] | None],
-        opts: _Options,
-        dedup: dict[Expr, Expr],
-        es: tuple[Expr, ...],
+              cls,
+              extract: Callable[[Expr], tuple[Expr, ...] | None],
+              opts: _Options,
+              dedup: dict[Expr, Expr],
+              es: tuple[Expr, ...],
     ) -> tuple[Expr, ...]:
         esc: list[Expr] = list()
         for e in es:
@@ -379,8 +378,8 @@ class Grammar:
 
     @staticmethod
     def _check_left_recursion(
-        rules: dict[str, Rule],
-        sccs: tuple[frozenset[str], ...],
+              rules: dict[str, Rule],
+              sccs: tuple[frozenset[str], ...],
     ) -> None:
         nullable: set[str] = set()
 
@@ -411,9 +410,7 @@ class Grammar:
 
         def check_leftmost(rulename: str, stack: list[str]) -> frozenset[str]:
             if rulename in stack:
-                raise ValueError(
-                    f"Left recursion detected: {' → '.join([*stack, rulename])}"
-                )
+                raise LeftRecursionDetected([*stack, rulename])
             if rulename in leftmost_cache:
                 return leftmost_cache[rulename]
 
@@ -470,31 +467,40 @@ class Grammar:
         return self._entrypoint
 
     def parse_file(
-        self,
-        path: str | Path,
-        *,
-        encoding: str = "utf8",
-        opts: Opts | None = None,
+              self,
+              path: str | Path,
+              *,
+              encoding: str = "utf8",
+              opts: Opts | None = None,
     ) -> Iterator[ParseEvent]:
         yield from self.parse(
             Path(path).read_text(encoding=encoding),
             opts=opts,
         )
 
-    def parse(self, s: str, *, opts: Opts | None = None) -> Iterator[ParseEvent]:
+    def parse(self, s: str, /, *, opts: Opts | None = None) -> Iterator[ParseEvent]:
+        """
+        Tries to parse the complete string passed as first argument.
+        If the string can not be consumed fully, an InexhaustiveParse
+        exception is raised.
+
+        Returns the parse events that occur during parsing (entering a rule, exiting a rule,
+        seeing a terminal value, etc.).  Which ParseEvents should be emitted can be
+        configured by the passed `opts=`.
+        """
         try:
             ix = yield from self._parse(
                 Ref(self.entrypoint), s, 0, self._opts.override(opts), self._context
             )
             if ix != len(s):
-                raise NoParse(
-                    f"did not exhaustively match stopped at {s[ix : ix + 10]}"
+                raise InexhaustiveParse(
+                    f"did not exhaustively match stopped at {s[ix: ix + 10]}"
                 )
         finally:
             self._cache.clear()
 
     def parse_file_ast(
-        self, path: str | Path, *, encoding: str = "utf8", opts: Opts | None = None
+              self, path: str | Path, *, encoding: str = "utf8", opts: Opts | None = None
     ) -> AST:
         return self.parse_ast(
             Path(path).read_text(encoding=encoding),
@@ -524,7 +530,7 @@ class Grammar:
         return stack.pop().build(s, len(s))
 
     def _parse_cached(
-        self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
     ) -> tuple[int, list[ParseEvent]]:
         cache_key = (id(expr), id(s), ix, opts)
         if cache_key not in self._cache:
@@ -532,12 +538,12 @@ class Grammar:
         return self._cache[cache_key]
 
     def _parse_uncached(
-        self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
     ) -> tuple[int, list[ParseEvent]]:
         return consume(self._parse(expr, s, ix, opts, ctx))
 
     def _parse_buffered(
-        self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
     ) -> tuple[int, list[ParseEvent]]:
         """Apply parser `expr` on `s` from offset `ix` – depending on `opts` use either cached or uncached path."""
         if opts.use_cache:
@@ -546,11 +552,11 @@ class Grammar:
             return self._parse_uncached(expr, s, ix, opts, ctx)
 
     def _parse_ref(
-        self, expr: Ref, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Ref, s: str, ix: int, opts: _Options, ctx: Context
     ) -> Generator[ParseEvent, None, int]:
         rule = self[expr.name]
         if "emit" in rule.flags and opts.check(
-            ev := ParseEvent(ParseEventKind.START, expr.name, ix)
+                  ev := ParseEvent(ParseEventKind.START, expr.name, ix)
         ):
             yield ev
         pix = ix
@@ -558,17 +564,17 @@ class Grammar:
         if rule.actions:
             rule.eval(ctx, ix)
         if "emit" in rule.flags and opts.check(
-            ev := ParseEvent(ParseEventKind.VALUE, expr.name, ix, s[pix:ix])
+                  ev := ParseEvent(ParseEventKind.VALUE, expr.name, ix, s[pix:ix])
         ):
             yield ev
         if "emit" in rule.flags and opts.check(
-            ev := ParseEvent(ParseEventKind.END, expr.name, ix)
+                  ev := ParseEvent(ParseEventKind.END, expr.name, ix)
         ):
             yield ev
         return ix
 
     def _parse_alt_first_match(
-        self, expr: Alt, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Alt, s: str, ix: int, opts: _Options, ctx: Context
     ) -> Generator[ParseEvent, None, int]:
         errors: list[NoParse] = list()
         for e in expr.branches:
@@ -585,7 +591,7 @@ class Grammar:
         )
 
     def _parse_alt_longest_match(
-        self, expr: Alt, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Alt, s: str, ix: int, opts: _Options, ctx: Context
     ) -> Generator[ParseEvent, None, int]:
         errors: list[NoParse] = list()
         current_best: int = 0
@@ -610,14 +616,14 @@ class Grammar:
         return current_best
 
     def _parse_seq(
-        self, expr: Seq, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Seq, s: str, ix: int, opts: _Options, ctx: Context
     ) -> Generator[ParseEvent, None, int]:
         for e in expr.steps:
             ix = yield from self._parse(e, s, ix, opts, ctx)
         return ix
 
     def _parse_repeat(
-        self, r: Many, s: str, ix: int, opts: _Options, ctx: Context
+              self, r: Many, s: str, ix: int, opts: _Options, ctx: Context
     ) -> Generator[ParseEvent, None, int]:
         if r.max is not None:
             for _ in range(r.max):
@@ -655,7 +661,7 @@ class Grammar:
         raise NoParse(f"Expected {regex.pattern.pattern} at pos={ix}")
 
     def _parse(
-        self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
+              self, expr: Expr, s: str, ix: int, opts: _Options, ctx: Context
     ) -> Generator[ParseEvent, None, int]:
         match expr:
             case Ref():
@@ -685,13 +691,13 @@ class _Rule(NamedTuple):
 
 
 type _Pragma = (
-    _FlagPragma
-    | _StackPragma
-    | _CounterPragma
-    | _PushPragma
-    | _PopPragma
-    | _SetPragma
-    | _RequirePragma
+          _FlagPragma
+          | _StackPragma
+          | _CounterPragma
+          | _PushPragma
+          | _PopPragma
+          | _SetPragma
+          | _RequirePragma
 )
 
 
@@ -1105,13 +1111,13 @@ class Parser:
                             f"@push references stack {stack_name} which has not been declared yet"
                         )
                     if missing_stacks := self.expression_parser.stack_refs(
-                        expr
+                              expr
                     ).difference(self._stacks):
                         raise ParseError(
                             f"Missing stack references in @push expression: {', '.join(missing_stacks)}"
                         )
                     if missing_counters := self.expression_parser.counter_refs(
-                        expr
+                              expr
                     ).difference(self._counters):
                         raise ParseError(
                             f"Missing counter references in @push expression: {', '.join(missing_counters)}"
@@ -1129,13 +1135,13 @@ class Parser:
                             f"@set references counter {counter_name} which has not been declared yet"
                         )
                     if missing_stacks := self.expression_parser.stack_refs(
-                        expr
+                              expr
                     ).difference(self._stacks):
                         raise ParseError(
                             f"Missing stack references in @set expression: {', '.join(missing_stacks)}"
                         )
                     if missing_counters := self.expression_parser.counter_refs(
-                        expr
+                              expr
                     ).difference(self._counters):
                         raise ParseError(
                             f"Missing counter references in @set expression: {', '.join(missing_counters)}"
@@ -1143,13 +1149,13 @@ class Parser:
                     actions.append(action)
                 case _RequirePragma(expr) as action:
                     if missing_stacks := self.expression_parser.stack_refs(
-                        expr
+                              expr
                     ).difference(self._stacks):
                         raise ParseError(
                             f"Missing stack references in @require expression: {', '.join(missing_stacks)}"
                         )
                     if missing_counters := self.expression_parser.counter_refs(
-                        expr
+                              expr
                     ).difference(self._counters):
                         raise ParseError(
                             f"Missing counter references in @require expression: {', '.join(missing_counters)}"
@@ -1160,9 +1166,9 @@ class Parser:
         self.load(Path(path).read_text(encoding=encoding))
 
     def compile(
-        self,
-        entrypoint: str | None = None,
-        opts: Opts | None = None,
+              self,
+              entrypoint: str | None = None,
+              opts: Opts | None = None,
     ) -> Grammar:
         g = Grammar(self._rules, entrypoint, opts, self._stacks, self._counters)
         return g
