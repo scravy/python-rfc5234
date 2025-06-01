@@ -117,22 +117,36 @@ def can_be_empty(expr: Expr, nullable: Set[str]) -> bool:
             return name in nullable
         case Char():
             return False
+        case Regex():
+            raise NotImplementedError("first_set not implemented for Regex")
     raise RuntimeError("unreachable code")
 
 
-# def first_set(expr: Expr, resolve: Callable[[str], Expr]) -> FrozenIntSet:
-#     def _first_set(e: Expr):
-#         match e:
-#             case Ref(rn):
-#                 yield from _first_set(resolve(rn))
-#             case Alt(es):
-#                 for e in es:
-#                     yield from _first_set(e)
-#             case Seq(es):
-#                 pass
-#             case Many(max=n):
-#                 pass
-#             case Char(cs):
-#                 yield from cs
-#
-#     return FrozenIntSet(_first_set(expr))
+def first_set(expr: Expr, resolve: Callable[[str], Expr], nullable: Set[str]) -> FrozenIntSet:
+    known: dict[str, FrozenIntSet] = dict()
+
+    def _first_set(e: Expr):
+        match e:
+            case Ref(rn):
+                if rn not in known:
+                    known[rn] = FrozenIntSet()
+                    known[rn] = _first_set(resolve(rn))
+                return known[rn]
+            case Alt(es):
+                return FrozenIntSet.union_all(_first_set(e) for e in es)
+            case Seq(es):
+                rs = []
+                for e in es:
+                    rs.append(_first_set(e))
+                    if not can_be_empty(e, nullable):
+                        break
+                return FrozenIntSet.union_all(rs)
+            case Many(expr=e):
+                return _first_set(e)
+            case Char(cs):
+                return cs
+            case Regex():
+                raise NotImplementedError("first_set not implemented for Regex")
+        raise RuntimeError("unreachable code")
+
+    return _first_set(expr)
