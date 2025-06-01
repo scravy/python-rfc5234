@@ -73,6 +73,9 @@ def test_load_generic(
 ):
     """
     Checks loading various ABNF grammars via the ABNF grammar from RFC 5234 loaded as such a grammar.
+    The ABNF grammar we use is slightly modified from the original grammer – it accepts `[CR] LF` as newline
+    (instead of `CR LF`), and it reorders one particular alternative (`"=/" / "="` instead of `"=" / "=/"`
+    in the definition of `defined-as`), which makes continued rules work when using ParsingStrategy.FIRST_MATCH.
     """
     core = read_abnf("core")
     text = read_abnf("abnf")

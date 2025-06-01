@@ -1,6 +1,6 @@
 import itertools
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import NamedTuple, final
 from frozenintset import FrozenIntSet
 
@@ -67,3 +67,14 @@ class Regex(NamedTuple):
     @staticmethod
     def of(pattern: str) -> "Regex":
         return Regex(re.compile(pattern))
+
+
+def refs(expr: Expr) -> Iterator[str]:
+    match expr:
+        case Many(expr=e):
+            yield from refs(e)
+        case Alt(es) | Seq(es):
+            for e in es:
+                yield from refs(e)
+        case Ref(rule):
+            yield rule

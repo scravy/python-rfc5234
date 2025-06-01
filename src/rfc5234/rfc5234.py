@@ -3,7 +3,6 @@ import itertools
 import re
 from collections import deque, ChainMap
 from collections.abc import (
-    Callable,
     Generator,
     Iterator,
     Set,
@@ -16,26 +15,27 @@ from strongly_connected_components import strongly_connected_components
 
 from .abnf import read_abnf
 from .ast import AST, ASTBuilder, ASTLeaf, ASTNode
+from .compile import compile_rules
 from .context import Context
 from .defs import (
-    ParseEventKind,
-    ParseEvent,
-    ParsingStrategy,
     InlineStrategy,
     Opts,
+    ParseEvent,
+    ParseEventKind,
+    ParsingStrategy,
 )
 from .exc import (
     EndOfFile,
+    EntrypointInferrenceFailed,
     Expected,
+    InexhaustiveParse,
+    LeftRecursionDetected,
+    MissingReference,
+    MultipleEntrypointsDefined,
     NoAlternativeMatched,
     NoParse,
     ParseError,
     RequireFailed,
-    InexhaustiveParse,
-    LeftRecursionDetected,
-    MultipleEntrypointsDefined,
-    EntrypointInferrenceFailed,
-    MissingReference,
 )
 from .expr import (
     Alt,
@@ -45,6 +45,7 @@ from .expr import (
     Ref,
     Regex,
     Seq,
+    refs,
 )
 from .simple_expr import (
     And,
@@ -137,13 +138,13 @@ class Rule(NamedTuple):
                 expr = Alt.of([expr], es2)
             case e1, e2:
                 expr = Alt.of([e1, e2])
-        return self.replace(expr)
+        return self.with_expr(expr)
 
-    def replace(self, expr: Expr) -> Self:
+    def with_expr(self, expr: Expr) -> Self:
         return Rule(expr, self.flags, self.actions)
 
     def inline(self, rules: dict[str, Self], rule: str) -> Self:
-        return self.replace(self._inline(self.expr, rules, rule))
+        return self.with_expr(self._inline(self.expr, rules, rule))
 
     @classmethod
     def _inline(cls, expr: Expr, rules: dict[str, "Rule"], rule: str) -> Expr:
@@ -219,11 +220,11 @@ class Grammar:
         if entrypoint is None and len(entrypoints) == 1:
             entrypoint = next(iter(entrypoints))
         for name, rule in rules.items():
-            refs = frozenset(cls._refs(rule.expr))
-            for ref in refs:
+            refnames = frozenset(refs(rule.expr))
+            for ref in refnames:
                 if ref not in rules:
                     raise MissingReference(name, ref)
-            g[name] = refs
+            g[name] = refnames
         sccs: tuple[frozenset[str], ...] = tuple(strongly_connected_components(g))
         for scc in sccs:
             if len(scc) > 1:
@@ -248,110 +249,21 @@ class Grammar:
         return entrypoint, {name: rule for name, rule in rules.items() if name == entrypoint or name in reachable}
 
     @classmethod
-    def _all_refs(cls, rules: dict[str, Rule], name: str) -> frozenset[str]:
-        return frozenset(cls.__all_refs(rules, name, set()))
+    def _all_refs(cls, rules: dict[str, Rule], rulename: str) -> frozenset[str]:
+        def all_refs(name: str, visited: set[str]) -> Iterator[str]:
+            visited.add(name)
+            rule = rules[name]
+            for ref in refs(rule.expr):
+                yield ref
+                if ref not in visited:
+                    yield from all_refs(ref, visited)
 
-    @classmethod
-    def __all_refs(cls, rules: dict[str, Rule], name: str, visited: set[str]) -> Iterator[str]:
-        visited.add(name)
-        rule = rules[name]
-        for ref in cls._refs(rule.expr):
-            yield ref
-            if ref not in visited:
-                yield from cls.__all_refs(rules, ref, visited)
+        return frozenset(all_refs(rulename, set()))
 
     @classmethod
     def _compile(cls, rules: dict[str, Rule], opts: _Options) -> dict[str, Rule]:
-        dedup: dict[Expr, Expr] = dict()
-        return {
-            name: Rule(cls._compile_expr(opts, dedup, rule.expr), rule.flags, rule.actions)
-            for name, rule in rules.items()
-        }
-
-    @classmethod
-    def _flatten(
-        cls,
-        extract: Callable[[Expr], tuple[Expr, ...] | None],
-        opts: _Options,
-        dedup: dict[Expr, Expr],
-        es: tuple[Expr, ...],
-    ) -> tuple[Expr, ...]:
-        esc: list[Expr] = list()
-        for e in es:
-            ec = cls._compile_expr(opts, dedup, e)
-            if (ec_es := extract(ec)) is not None:
-                esc.extend(ec_es)
-            else:
-                esc.append(ec)
-        return tuple(esc)
-
-    @classmethod
-    def _compile_expr(cls, opts: _Options, dedup: dict[Expr, Expr], expr: Expr) -> Expr:
-        match expr:
-            case Alt(es):
-                ces = cls._flatten(
-                    lambda ex: ex.branches if isinstance(ex, Alt) else None,
-                    opts,
-                    dedup,
-                    es,
-                )
-                if all(isinstance(ce, Char) for ce in ces):
-                    expr = Char(FrozenIntSet.union_all(ce.allowed for ce in ces))  # type: ignore[union-attr]
-                else:
-                    expr = Alt(ces)
-            case Seq(es):
-                expr = Seq(
-                    cls._flatten(
-                        lambda ex: ex.steps if isinstance(ex, Seq) else None,
-                        opts,
-                        dedup,
-                        es,
-                    )
-                )
-            case Many(max=max_, expr=e):
-                expr = Many(max=max_, expr=cls._compile_expr(opts, dedup, e))
-        if opts.use_regex:
-            expr = cls._compile_to_regex(expr)
-        if expr not in dedup:
-            dedup[expr] = expr
-        return dedup[expr]
-
-    @staticmethod
-    def _regex_escape(c: int) -> str:
-        match c:
-            case 0x20 | 0x2A | 0x2B | 0x2D | 0x3F | 0x5B | 0x5D:
-                return rf"\x{c:02x}"
-        return re.escape(chr(c))
-
-    # noinspection RegExpUnnecessaryNonCapturingGroup
-    @classmethod
-    def _compile_to_regex(cls, expr: Expr) -> Expr:
-        match expr:
-            case Alt(es) if all(isinstance(e, Regex) for e in es):
-                expr = Regex.of("(" + "|".join(e.pattern.pattern for e in es) + ")")  # type: ignore[union-attr]
-            case Seq(es) if all(isinstance(e, Regex) for e in es):
-                expr = Regex.of("(" + "".join(e.pattern.pattern for e in es) + ")")  # type: ignore[union-attr]
-            case Many(max=1, expr=Regex(pat)):
-                expr = Regex.of(f"({pat.pattern})?")
-            case Many(max=None, expr=Regex(pat)):
-                expr = Regex.of(f"({pat.pattern})*")
-            case Many(max=max_, expr=Regex(pat)):
-                rep = "".join(["{0,", "" if max_ is None else str(max_), "}"])
-                expr = Regex.of(f"({pat.pattern}){rep}")
-            case Char(rs):
-                rx = "".join(
-                    (
-                        cls._regex_escape(rng.start)
-                        if rng.start == rng.stop - 1
-                        else f"{cls._regex_escape(rng.start)}-{cls._regex_escape(rng.stop - 1)}"
-                    )
-                    for rng in rs.ranges
-                )
-                try:
-                    expr = Regex.of(rx if len(rx) == 1 else f"[{rx}]")
-                except re.error:
-                    pass
-        return expr
+        compiled_rules = compile_rules({name: rule.expr for name, rule in rules.items()}, use_regex=opts.use_regex)
+        return {name: rule.with_expr(compiled_rules[name]) for name, rule in rules.items()}
 
     @staticmethod
     def _check_left_recursion(
@@ -423,17 +335,6 @@ class Grammar:
 
         for rule in rules:
             check_leftmost(rule, [])
-
-    @classmethod
-    def _refs(cls, expr: Expr) -> Iterator[str]:
-        match expr:
-            case Many(expr=e):
-                yield from cls._refs(e)
-            case Alt(es) | Seq(es):
-                for e in es:
-                    yield from cls._refs(e)
-            case Ref(rule):
-                yield rule
 
     @property
     def rules(self) -> Set[str]:
@@ -908,6 +809,7 @@ class Parser:
     def _parse_sequence(self) -> Expr:
         exprs: list[Expr] = list()
         while (expr := self._parse_repeat()) is not None:
+            # noinspection PyUnreachableCode
             match expr:
                 case Seq(es):
                     exprs.extend(es)
@@ -916,6 +818,7 @@ class Parser:
         return self._sequence(exprs)
 
     def _sequence(self, exprs: list[Expr]) -> Expr:
+        # noinspection PyUnreachableCode
         match exprs:
             case []:
                 raise ParseError

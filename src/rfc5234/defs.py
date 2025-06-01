@@ -1,6 +1,6 @@
 import re
 from enum import auto, IntFlag, IntEnum
-from typing import NamedTuple, final
+from typing import NamedTuple, final, Self
 
 
 @final
@@ -49,7 +49,7 @@ class Opts(NamedTuple):
         use_regex: bool | None = None,
         use_cache: bool | None = None,
         inline_strategy: InlineStrategy | None = None,
-    ):
+    ) -> Self:
         return Opts(
             events=self.events if events is None else events,
             events_filter=self.events_filter if events_filter is None else events_filter,
