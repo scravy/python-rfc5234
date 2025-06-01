@@ -39,3 +39,22 @@ class Opts(NamedTuple):
     use_regex: bool | None = None
     use_cache: bool | None = None
     inline_strategy: InlineStrategy | None = None
+
+    def __call__(
+        self,
+        *,
+        events: None | ParseEventKind = None,
+        events_filter: None | re.Pattern[str] = None,
+        strategy: None | ParsingStrategy = None,
+        use_regex: bool | None = None,
+        use_cache: bool | None = None,
+        inline_strategy: InlineStrategy | None = None,
+    ):
+        return Opts(
+            events=self.events if events is None else events,
+            events_filter=self.events_filter if events_filter is None else events_filter,
+            strategy=self.strategy if strategy is None else strategy,
+            use_regex=self.use_regex if use_regex is None else use_regex,
+            use_cache=self.use_cache if use_cache is None else use_cache,
+            inline_strategy=self.inline_strategy if inline_strategy is None else inline_strategy,
+        )

@@ -35,9 +35,7 @@ class TokenKind(Enum):
         style=(Back.BLACK, Style.BRIGHT, Fore.LIGHTWHITE_EX),
     )
     STACK_PRAGMA = TokenDef(
-        pattern=re.compile(
-            rf"(?m:^(;; )?@@stack (?P<stack_name>{_RULENAME.pattern}))\n"
-        ),
+        pattern=re.compile(rf"(?m:^(;; )?@@stack (?P<stack_name>{_RULENAME.pattern}))\n"),
         style=Fore.LIGHTRED_EX,
     )
     COUNTER_PRAGMA = TokenDef(
@@ -60,9 +58,7 @@ class TokenKind(Enum):
         ),
     )
     REQUIRE_PRAGMA = TokenDef(
-        pattern=re.compile(
-            rf"(?m:^(;; )?@require (?P<require_expr>{_SIMPLE_EXPR.pattern}))\n"
-        ),
+        pattern=re.compile(rf"(?m:^(;; )?@require (?P<require_expr>{_SIMPLE_EXPR.pattern}))\n"),
     )
     FLAG_PRAGMA = TokenDef(
         pattern=re.compile(rf"(?m:^(;; )?@(?P<flag_name>{_RULENAME.pattern}))\n"),
@@ -155,9 +151,7 @@ class Token(NamedTuple):
 
 
 def tokenize(s: str, /) -> Iterator[Token]:
-    tok_regex: re.Pattern[str] = re.compile(
-        "|".join(f"(?P<{k.name}>{k.value.pattern.pattern})" for k in TokenKind)
-    )
+    tok_regex: re.Pattern[str] = re.compile("|".join(f"(?P<{k.name}>{k.value.pattern.pattern})" for k in TokenKind))
     pos: int = 0
     m = tok_regex.match(s, pos)
     while m is not None:
@@ -180,9 +174,7 @@ def clean(tokens: Iterator[Token]):
             case TokenKind.SKIP:
                 pass
             case TokenKind.MISMATCH:
-                raise UnexpectedCharacter(
-                    f"Unexpected character: {token.value} at {token.pos}"
-                )
+                raise UnexpectedCharacter(f"Unexpected character: {token.value} at {token.pos}")
             case _:
                 yield token
 

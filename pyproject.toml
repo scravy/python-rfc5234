@@ -32,6 +32,12 @@ Tracker = "https://github.com/scravy/python-rfc5234/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.ruff]
+line-length = 120
+
+[tool.black]
+line-length = 120
+
 [dependency-groups]
 dev = [
     "build>=1.2.2.post1",

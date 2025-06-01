@@ -4,10 +4,17 @@ from typing import Final
 
 import pytest
 
-from rfc5234 import Opts, ParsingStrategy, ParseEventKind, InlineStrategy, Parser, Grammar
+from rfc5234 import (
+    Opts,
+    ParsingStrategy,
+    ParseEventKind,
+    InlineStrategy,
+    Parser,
+    Grammar,
+)
 from rfc5234.abnf import read_abnf
 
-opts = Opts(
+_OPTS: Final[Opts] = Opts(
     use_regex=True,
     strategy=ParsingStrategy.FIRST_MATCH,
     events=ParseEventKind.VALUE,
@@ -49,15 +56,23 @@ def test_load(name: str, entrypoint: str | None):
     p.load(core)
     p.load(text)
 
-    g = p.compile(opts=opts)
+    g = p.compile(opts=_OPTS)
     if entrypoint:
         assert g.entrypoint == entrypoint
 
 
-@pytest.fixture(scope="session")
-def abnf_grammar() -> Grammar:
+@pytest.mark.parametrize("inline_strategy", InlineStrategy)
+@pytest.mark.parametrize("parsing_strategy", ParsingStrategy)
+@pytest.mark.parametrize("use_regex", [True, False])
+@pytest.mark.parametrize("name", [n for n, *_ in grammars])
+def test_load_generic(
+    inline_strategy: InlineStrategy,
+    parsing_strategy: ParsingStrategy,
+    use_regex: bool,
+    name: str,
+):
     """
-    The ABNF grammar from RFC 5234 loaded as a generic grammar.
+    Checks loading various ABNF grammars via the ABNF grammar from RFC 5234 loaded as such a grammar.
     """
     core = read_abnf("core")
     text = read_abnf("abnf")
@@ -66,16 +81,16 @@ def abnf_grammar() -> Grammar:
     p.load(core)
     p.load(text)
 
-    return p.compile(opts=opts)
+    opts = _OPTS(inline_strategy=inline_strategy, strategy=parsing_strategy, use_regex=use_regex)
+    abnf_grammar: Grammar = p.compile(opts=opts)
 
-
-@pytest.mark.parametrize("name", [n for n, *_ in grammars])
-def test_load_generic(abnf_grammar: Grammar, name: str):
-    """
-    Checks loading various ABNF grammars via the ABNF grammar from RFC 5234 loaded as such a grammar.
-    """
     text = read_abnf(name)
-    abnf_grammar.parse(text, opts=opts)
+    last = None
+    for ev in abnf_grammar.parse(text, opts=opts):
+        last = ev
+    assert last is not None
+    assert last.rule == "rulelist"
+    assert last.value == text
 
 
 def test_left_recursion_detection():
@@ -86,12 +101,14 @@ def test_left_recursion_detection():
 
     p = Parser()
     p.load(core)
-    p.load(textwrap.dedent("""
+    p.load(
+        textwrap.dedent("""
         r1 = r2 "a"
         r2 = r3 "b"
         r3 = r1 / "c"
-    """))
+    """)
+    )
 
     with pytest.raises(ValueError) as err:
-        p.compile(opts=opts)
+        p.compile(opts=_OPTS)
     assert err.value.args[0].startswith("Left recursion detected:")

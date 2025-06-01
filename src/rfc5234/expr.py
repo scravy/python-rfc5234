@@ -24,9 +24,7 @@ class Alt(NamedTuple):
         return Alt(tuple(itertools.chain.from_iterable(it)))
 
     def __str__(self) -> str:
-        return "/".join(
-            f"({e})" if isinstance(e, (Seq, Alt)) else f"{e}" for e in self.branches
-        )
+        return "/".join(f"({e})" if isinstance(e, (Seq, Alt)) else f"{e}" for e in self.branches)
 
 
 @final
@@ -38,9 +36,7 @@ class Seq(NamedTuple):
         return Seq(tuple(itertools.chain.from_iterable(it)))
 
     def __str__(self) -> str:
-        return "/".join(
-            f"({e})" if isinstance(e, (Seq, Alt)) else f"{e}" for e in self.steps
-        )
+        return "/".join(f"({e})" if isinstance(e, (Seq, Alt)) else f"{e}" for e in self.steps)
 
 
 @final
@@ -59,11 +55,7 @@ class Char(NamedTuple):
 
     def __str__(self) -> str:
         return "/".join(
-            (
-                f"%x{rng.start:02x}"
-                if rng.start == rng.stop - 1
-                else f"%x{rng.start:02x}-{rng.stop - 1:02x}"
-            )
+            (f"%x{rng.start:02x}" if rng.start == rng.stop - 1 else f"%x{rng.start:02x}-{rng.stop - 1:02x}")
             for rng in self.allowed.ranges
         )
 
