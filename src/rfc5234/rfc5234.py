@@ -6,6 +6,7 @@ from collections.abc import (
     Generator,
     Iterator,
     Set,
+    Mapping,
 )
 from pathlib import Path
 from typing import NamedTuple, final, Final, Self
@@ -15,7 +16,7 @@ from strongly_connected_components import strongly_connected_components
 
 from .abnf import read_abnf
 from .ast import AST, ASTBuilder, ASTLeaf, ASTNode
-from .compile import compile_rules
+from .compile import compile_expr, CompilationContext
 from .context import Context
 from .defs import (
     InlineStrategy,
@@ -46,6 +47,9 @@ from .expr import (
     Regex,
     Seq,
     refs,
+    inline,
+    all_refs,
+    can_be_empty,
 )
 from .simple_expr import (
     And,
@@ -143,22 +147,6 @@ class Rule(NamedTuple):
     def with_expr(self, expr: Expr) -> Self:
         return Rule(expr, self.flags, self.actions)
 
-    def inline(self, rules: dict[str, Self], rule: str) -> Self:
-        return self.with_expr(self._inline(self.expr, rules, rule))
-
-    @classmethod
-    def _inline(cls, expr: Expr, rules: dict[str, "Rule"], rule: str) -> Expr:
-        match expr:
-            case Ref(r) if r == rule:
-                return rules[r].expr
-            case Alt(es):
-                return Alt.of(cls._inline(e, rules, rule) for e in es)
-            case Seq(es):
-                return Seq.of(cls._inline(e, rules, rule) for e in es)
-            case Many(max=max_, expr=e):
-                return Many(max=max_, expr=cls._inline(e, rules, rule))
-        return expr
-
 
 @final
 class Grammar:
@@ -173,9 +161,9 @@ class Grammar:
         counters: dict[str, int],
     ):
         self._opts: Final[_Options] = _Options().override(opts)
-        entrypoint, rules = self._check_rules(self._opts, rules, entrypoint)
+        entrypoint, rules, nullable = self._check_rules(self._opts, rules, entrypoint)
         self._entrypoint: Final[str] = entrypoint
-        self._rules: Final[dict[str, Rule]] = self._compile(rules, self._opts)
+        self._rules: Final[dict[str, Rule]] = self._compile(rules, nullable, self._opts)
         self._context: Final[Context] = Context(
             stacks=ChainMap({name: None for name in stacks}),
             counters=ChainMap({name: value for name, value in counters.items()}),
@@ -203,7 +191,7 @@ class Grammar:
     @classmethod
     def _check_rules(
         cls, opts: _Options, rules: dict[str, Rule], entrypoint: str | None
-    ) -> tuple[str, dict[str, Rule]]:
+    ) -> tuple[str, dict[str, Rule], frozenset[str]]:
         g = dict()
         to_be_inlined: set[str] = set()
         force_inlined: set[str] = set()
@@ -238,63 +226,48 @@ class Grammar:
         if entrypoint is None:
             raise EntrypointInferrenceFailed
         to_be_inlined -= {entrypoint}
-        cls._check_left_recursion(rules, sccs)
+
+        def resolve(rn: str) -> Expr:
+            return rules[rn].expr
+
+        nullable = cls._compute_nullability(rules, sccs)
+        cls._check_left_recursion(rules, nullable)
         for ix, scc in enumerate(sccs):
             for name in scc:
                 if name in to_be_inlined:
                     for jx in range(ix, len(sccs)):
                         for n in sccs[jx]:
-                            rules[n] = rules[n].inline(rules, name)
-        reachable = cls._all_refs(rules, entrypoint)
-        return entrypoint, {name: rule for name, rule in rules.items() if name == entrypoint or name in reachable}
+                            rules[n] = rules[n].with_expr(inline(rules[n].expr, resolve, name))
+        reachable = all_refs(resolve, entrypoint)
+        return (
+            entrypoint,
+            {name: rule for name, rule in rules.items() if name == entrypoint or name in reachable},
+            frozenset(name for name in nullable if name in reachable),
+        )
 
     @classmethod
-    def _all_refs(cls, rules: dict[str, Rule], rulename: str) -> frozenset[str]:
-        def all_refs(name: str, visited: set[str]) -> Iterator[str]:
-            visited.add(name)
-            rule = rules[name]
-            for ref in refs(rule.expr):
-                yield ref
-                if ref not in visited:
-                    yield from all_refs(ref, visited)
-
-        return frozenset(all_refs(rulename, set()))
-
-    @classmethod
-    def _compile(cls, rules: dict[str, Rule], opts: _Options) -> dict[str, Rule]:
-        compiled_rules = compile_rules({name: rule.expr for name, rule in rules.items()}, use_regex=opts.use_regex)
-        return {name: rule.with_expr(compiled_rules[name]) for name, rule in rules.items()}
+    def _compile(cls, rules: Mapping[str, Rule], nullable: frozenset[str], opts: _Options) -> dict[str, Rule]:
+        ctx = CompilationContext.new(use_regex=opts.use_regex, nullable=nullable)
+        return {name: rule.with_expr(compile_expr(ctx, rule.expr)) for name, rule in rules.items()}
 
     @staticmethod
-    def _check_left_recursion(
-        rules: dict[str, Rule],
+    def _compute_nullability(
+        rules: Mapping[str, Rule],
         sccs: tuple[frozenset[str], ...],
-    ) -> None:
+    ) -> set[str]:
         nullable: set[str] = set()
-
-        def _can_be_empty(expr: Expr) -> bool:
-            match expr:
-                case Many():
-                    return True
-                case Alt(branches):
-                    return any(_can_be_empty(b) for b in branches)
-                case Seq(steps):
-                    return all(_can_be_empty(s) for s in steps)
-                case Ref(name):
-                    return name in nullable
-                case Char():
-                    return False
-            raise RuntimeError("unreachable code")
-
         for scc in sccs:
             changed = True
             while changed:
                 changed = False
                 for rule in scc:
-                    if rule not in nullable and _can_be_empty(rules[rule].expr):
+                    if rule not in nullable and can_be_empty(rules[rule].expr, nullable):
                         nullable.add(rule)
                         changed = True
+        return nullable
 
+    @staticmethod
+    def _check_left_recursion(rules: Mapping[str, Rule], nullable: Set[str]) -> None:
         leftmost_cache: dict[str, frozenset[str]] = dict()
 
         def check_leftmost(rulename: str, stack: list[str]) -> frozenset[str]:

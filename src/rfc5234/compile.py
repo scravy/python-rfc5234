@@ -18,11 +18,11 @@ from .expr import (
 class CompilationContext(NamedTuple):
     dedup: dict[Expr, Expr]
     use_regex: bool
+    nullable: frozenset[str]
 
-
-def compile_rules(rules: dict[str, Expr], *, use_regex: bool) -> dict[str, Expr]:
-    ctx = CompilationContext(dedup=dict(), use_regex=use_regex)
-    return {name: compile_expr(ctx, expr) for name, expr in rules.items()}
+    @staticmethod
+    def new(use_regex: bool, nullable: frozenset[str]):
+        return CompilationContext(dict(), use_regex=use_regex, nullable=nullable)
 
 
 def flatten_and_compile(
@@ -41,6 +41,7 @@ def flatten_and_compile(
 
 
 def compile_expr(ctx: CompilationContext, expr: Expr) -> Expr:
+    # flatten
     match expr:
         case Alt(es):
             ces = flatten_and_compile(
@@ -62,8 +63,15 @@ def compile_expr(ctx: CompilationContext, expr: Expr) -> Expr:
             )
         case Many(max=max_, expr=e):
             expr = Many(max=max_, expr=compile_expr(ctx, e))
+    # optimize
+    match expr:
+        case Alt(es):
+            for e in es:
+                pass
+    # to regex
     if ctx.use_regex:
         expr = compile_to_regex(expr)
+    # dedup
     if expr not in ctx.dedup:
         ctx.dedup[expr] = expr
     return ctx.dedup[expr]

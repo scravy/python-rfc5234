@@ -1,3 +1,6 @@
+check: fmt lint test nox build
+	uv run twine check dist/*
+
 lint:
 	uv run ruff check
 	uv run mypy .
@@ -13,9 +16,6 @@ fmt:
 
 build:
 	uv run python -m build
-
-check: lint test nox build
-	uv run twine check dist/*
 
 publish: build twine-check
 	uv run twine upload dist/*

@@ -1,6 +1,6 @@
 import itertools
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Callable, Set
 from typing import NamedTuple, final
 from frozenintset import FrozenIntSet
 
@@ -78,3 +78,61 @@ def refs(expr: Expr) -> Iterator[str]:
                 yield from refs(e)
         case Ref(rule):
             yield rule
+
+
+def all_refs(resolve: Callable[[str], Expr], rulename: str) -> frozenset[str]:
+    def _all_refs(name: str, visited: set[str]) -> Iterator[str]:
+        visited.add(name)
+        expr = resolve(name)
+        for ref in refs(expr):
+            yield ref
+            if ref not in visited:
+                yield from _all_refs(ref, visited)
+
+    return frozenset(_all_refs(rulename, set()))
+
+
+def inline(expr: Expr, resolve: Callable[[str], Expr], rule: str) -> Expr:
+    match expr:
+        case Ref(rn) if rn == rule:
+            return resolve(rn)
+        case Alt(es):
+            return Alt.of(inline(e, resolve, rule) for e in es)
+        case Seq(es):
+            return Seq.of(inline(e, resolve, rule) for e in es)
+        case Many(max=n, expr=e):
+            return Many(max=n, expr=inline(e, resolve, rule))
+    return expr
+
+
+def can_be_empty(expr: Expr, nullable: Set[str]) -> bool:
+    match expr:
+        case Many():
+            return True
+        case Alt(branches):
+            return any(can_be_empty(b, nullable) for b in branches)
+        case Seq(steps):
+            return all(can_be_empty(s, nullable) for s in steps)
+        case Ref(name):
+            return name in nullable
+        case Char():
+            return False
+    raise RuntimeError("unreachable code")
+
+
+# def first_set(expr: Expr, resolve: Callable[[str], Expr]) -> FrozenIntSet:
+#     def _first_set(e: Expr):
+#         match e:
+#             case Ref(rn):
+#                 yield from _first_set(resolve(rn))
+#             case Alt(es):
+#                 for e in es:
+#                     yield from _first_set(e)
+#             case Seq(es):
+#                 pass
+#             case Many(max=n):
+#                 pass
+#             case Char(cs):
+#                 yield from cs
+#
+#     return FrozenIntSet(_first_set(expr))
