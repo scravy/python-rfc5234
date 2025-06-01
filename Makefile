@@ -6,7 +6,7 @@ lint:
 	uv run mypy .
 
 test:
-	uv run pytest
+	uv run pytest -n auto
 
 nox:
 	uv run nox
