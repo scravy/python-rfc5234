@@ -1,5 +1,5 @@
 import re
-from enum import auto, IntFlag, IntEnum
+from enum import auto, IntFlag, IntEnum, StrEnum
 from typing import NamedTuple, final, Self
 
 
@@ -29,6 +29,13 @@ class InlineStrategy(IntEnum):
     NO_INLINE = auto()
     EXPLICIT = auto()
     AGGRESSIVE = auto()
+
+
+@final
+class RuleFlag(StrEnum):
+    ENTRYPOINT = "entrypoint"
+    EMIT = "emit"
+    INLINE = "inline"
 
 
 @final

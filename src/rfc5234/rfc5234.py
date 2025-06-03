@@ -97,11 +97,11 @@ class _Options:
             return self
         return _Options(
             events=opts.events if opts.events is not None else self.events,
-            events_filter=(opts.events_filter if opts.events_filter is not None else self.events_filter),
+            events_filter=opts.events_filter if opts.events_filter is not None else self.events_filter,
             strategy=opts.strategy if opts.strategy is not None else self.strategy,
             use_regex=opts.use_regex if opts.use_regex is not None else self.use_regex,
             use_cache=opts.use_cache if opts.use_cache is not None else self.use_cache,
-            inline_strategy=(opts.inline_strategy if opts.inline_strategy is not None else self.inline_strategy),
+            inline_strategy=opts.inline_strategy if opts.inline_strategy is not None else self.inline_strategy,
         )
 
 

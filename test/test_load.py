@@ -115,3 +115,30 @@ def test_left_recursion_detection():
     with pytest.raises(ValueError) as err:
         p.compile(opts=_OPTS)
     assert err.value.args[0].startswith("Left recursion detected:")
+
+
+def test_valid_mutually_recursive_rules():
+    p = Parser()
+    p.load(
+        textwrap.dedent("""
+            foobar = foo / bar
+            foo = "foo" [bar]
+            bar = "bar" [foo]
+        """)
+    )
+    p.compile(opts=_OPTS)
+
+
+def test_something():
+    core = read_abnf("core")
+
+    p = Parser()
+    p.load(core)
+    p.load(
+        textwrap.dedent("""
+            foobar = foo / bar
+            foo = "foo" [bar]
+            bar = "bar" [foo]
+        """)
+    )
+    p.compile(opts=_OPTS)

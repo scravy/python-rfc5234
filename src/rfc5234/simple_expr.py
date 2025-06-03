@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from enum import Enum
 from typing import final, NamedTuple
 
@@ -163,3 +164,57 @@ def eval_int_expr(ctx: Context, pos: int, expr: IntExpr) -> int:
         case IntLit(value):
             return value
     raise RuntimeError("unreachable code")
+
+
+def stack_refs(expr: IntExpr | BoolExpr) -> frozenset[str]:
+    return frozenset(_stack_refs(expr))
+
+
+def _stack_refs(expr: IntExpr | BoolExpr) -> Iterator[str]:
+    match expr:
+        case IntApp1(arg1=arg):
+            yield from _stack_refs(arg)
+        case IntApp2(arg1=arg1, arg2=arg2):
+            yield from _stack_refs(arg1)
+            yield from _stack_refs(arg2)
+        case TopFn(stack_name):
+            yield stack_name
+        case And(left=left, right=right):
+            yield from _stack_refs(left)
+            yield from _stack_refs(right)
+        case Or(left=left, right=right):
+            yield from _stack_refs(left)
+            yield from _stack_refs(right)
+        case Not(expr=expr):
+            yield from _stack_refs(expr)
+        case Comparison(left=left, right=right):
+            yield from _stack_refs(left)
+            yield from _stack_refs(right)
+        case EmptyFn(stack_name):
+            yield stack_name
+
+
+def counter_refs(expr: IntExpr | BoolExpr) -> frozenset[str]:
+    return frozenset(_counter_refs(expr))
+
+
+def _counter_refs(expr: IntExpr | BoolExpr) -> Iterator[str]:
+    match expr:
+        case IntApp1(arg1=arg):
+            yield from _counter_refs(arg)
+        case IntApp2(arg1=arg1, arg2=arg2):
+            yield from _counter_refs(arg1)
+            yield from _counter_refs(arg2)
+        case CounterRef(counter_name):
+            yield counter_name
+        case And(left=left, right=right):
+            yield from _counter_refs(left)
+            yield from _counter_refs(right)
+        case Or(left=left, right=right):
+            yield from _counter_refs(left)
+            yield from _counter_refs(right)
+        case Not(expr=expr):
+            yield from _counter_refs(expr)
+        case Comparison(left=left, right=right):
+            yield from _counter_refs(left)
+            yield from _counter_refs(right)
